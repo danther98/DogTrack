@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "dogtrack"
+version = "0.1.0"
+description = ""
+authors = ["Daniel <danther98@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+ultralytics = "^8.3.58"
+opencv-python = "^4.10.0.84"
+black = {extras = ["d"], version = "^24.10.0"}
+
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
