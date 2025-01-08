@@ -10,6 +10,13 @@ python = "^3.10"
 ultralytics = "^8.3.58"
 opencv-python = "^4.10.0.84"
 black = {extras = ["d"], version = "^24.10.0"}
+matplotlib = "^3.10.0"
+scikit-image = "^0.25.0"
+scipy = "^1.15.0"
+pillow = "^11.1.0"
+h5py = "^3.12.1"
+imgaug = "^0.4.0"
+ipython = "^8.31.0"
 
 
 
