@@ -1,134 +1,98 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-"""
-=======================
-Visualization utilities
-=======================
-
-.. note::
-    Try on `Colab <https://colab.research.google.com/github/pytorch/vision/blob/gh-pages/main/_generated_ipynb_notebooks/plot_visualization_utils.ipynb>`_
-    or :ref:`go to the end <sphx_glr_download_auto_examples_others_plot_visualization_utils.py>` to download the full example code.
-
-This example illustrates some of the utilities that torchvision offers for
-visualizing images, bounding boxes, segmentation masks and keypoints.
-"""
-
-# sphinx_gallery_thumbnail_path = "../../gallery/assets/visualization_utils_thumbnail2.png"
-
+import cv2
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
+from PIL import Image
+from typing import Any, Tuple
+from torchvision import transforms
+from torchvision.models.detection import maskrcnn_resnet50_fpn_v2, MaskRCNN_ResNet50_FPN_V2_Weights
 
-import torchvision.transforms.functional as F
-from torchvision.utils import (
-    make_grid,
-    draw_bounding_boxes,
-    draw_segmentation_masks,
-    draw_keypoints,
-)
-from torchvision.io import decode_image
-from torchvision.models.detection import (
-    fasterrcnn_resnet50_fpn,
-    FasterRCNN_ResNet50_FPN_Weights,
-    maskrcnn_resnet50_fpn,
-    MaskRCNN_ResNet50_FPN_Weights,
-    keypointrcnn_resnet50_fpn,
-    KeypointRCNN_ResNet50_FPN_Weights,
-)
-from torchvision.models.segmentation import fcn_resnet50, FCN_ResNet50_Weights
-from pathlib import Path
-from torchvision.transforms.functional import resize, rotate
+COCO_INSTANCE_CATEGORY_NAMES = [
+    '__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
+    'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant',
+    'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse',
+    'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
+    'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard',
+    'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard',
+    'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork',
+    'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange',
+    'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair',
+    'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv',
+    'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave',
+    'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
+    'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+]
 
-plt.rcParams["savefig.bbox"] = "tight"
+def draw_mask(
+    frame: np.ndarray,
+    mask: np.ndarray,
+    color: Tuple[int, int, int] = (0, 255, 0),
+    alpha: float = 0.5
+) -> np.ndarray:
+    bool_mask = mask > 0.5
+    overlay = np.zeros_like(frame, dtype=np.uint8)
+    overlay[bool_mask] = color
+    return cv2.addWeighted(frame, 1.0, overlay, alpha, 0)
 
+def track_dogs_in_webcam(conf_thresh: float = 0.5) -> None:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Running on device: {device}")
 
-def show(imgs):
-    """
-    Utility to display a list of images (or a single image) using matplotlib.
-    """
-    if not isinstance(imgs, list):
-        imgs = [imgs]
-    fig, axs = plt.subplots(ncols=len(imgs), squeeze=False)
-    for i, img in enumerate(imgs):
-        img = img.detach() if isinstance(img, torch.Tensor) else img
-        img = F.to_pil_image(img)
-        axs[0, i].imshow(np.asarray(img))
-        axs[0, i].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
-    plt.show()
+    # Use the newer weights API
+    model = maskrcnn_resnet50_fpn_v2(weights=MaskRCNN_ResNet50_FPN_V2_Weights.COCO_V1).to(device)
+    model.eval()
 
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Error: Could not open webcam.")
+        return
 
-def main():
-    # Visualizing a grid of images
-    # ----------------------------
-    # The :func:`~torchvision.utils.make_grid` function can be used to create a
-    # tensor that represents multiple images in a grid. This util requires a single
-    # image of dtype ``uint8`` as input.
+    transform = transforms.ToTensor()
 
-    # Load and decode images
-    # Load and decode images
-    dog1_int = decode_image(str("IMG_4088.JPG"))
-    dog2_int = decode_image(str("IMG_4090.JPG"))
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame.")
+            break
 
-    # Resize images to the same size
-    target_size = (1280, 720)  # Example target size (height, width)
-    dog1_int = resize(dog1_int, target_size)
-    dog2_int = resize(dog2_int, target_size)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        input_tensor = transform(Image.fromarray(rgb_frame)).to(device)
 
-    # Rotate dog1_int by 90 degrees
-    dog1_int = rotate(dog1_int, 270)
+        with torch.no_grad():
+            predictions = model([input_tensor])
 
-    # Convert images to uint8
-    dog1_int = dog1_int.to(torch.uint8)
-    dog2_int = dog2_int.to(torch.uint8)
+        pred = predictions[0]
 
-    # Create a list of images
-    dog_list = [dog1_int, dog2_int]
+        boxes = pred['boxes']
+        labels = pred['labels']
+        scores = pred['scores']
+        masks = pred['masks']
 
-    grid = make_grid(dog_list)
-    show(grid)
+        for i, label_idx in enumerate(labels):
+            label_value = label_idx.item()
 
-    weights = MaskRCNN_ResNet50_FPN_Weights.DEFAULT
-    transforms = weights.transforms()
-    images = [transforms(d) for d in dog_list]
+            # Check index range to avoid IndexError
+            if 0 <= label_value < len(COCO_INSTANCE_CATEGORY_NAMES):
+                label_name = COCO_INSTANCE_CATEGORY_NAMES[label_value]
+            else:
+                # Skip or handle out-of-range index
+                continue
 
-    model = maskrcnn_resnet50_fpn(weights=weights, progress=False)
-    model = model.eval()
+            if scores[i] > conf_thresh and label_name == 'dog':
+                (x1, y1, x2, y2) = boxes[i].int().tolist()
+                mask = masks[i, 0].cpu().numpy()
 
-    output = model(images)
-    print(output)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, f"Dog: {scores[i]:.2f}", (x1, max(y1-5, 0)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-    dog1_output = output[0]
-    dog1_masks = dog1_output["masks"]
-    print(
-        f"shape = {dog1_masks.shape}, dtype = {dog1_masks.dtype}, "
-        f"min = {dog1_masks.min()}, max = {dog1_masks.max()}"
-    )
+                frame = draw_mask(frame, mask, color=(0, 255, 0), alpha=0.4)
 
-    print("For the first dog, the following instances were detected:")
-    print([weights.meta["categories"][label] for label in dog1_output["labels"]])
+        cv2.imshow('Dog Detection (Mask R-CNN)', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-    # Convert the probabilities into boolean values via threshold
-    proba_threshold = 0.5
-    dog1_bool_masks = dog1_output["masks"] > proba_threshold
-    dog1_bool_masks = dog1_bool_masks.squeeze(1)
-    # show(draw_segmentation_masks(dog1_int, dog1_bool_masks, alpha=0.9))
-
-    print(dog1_output["scores"])
-
-    # Filter by score
-    score_threshold = 0.75
-    boolean_masks = [
-        out["masks"][out["scores"] > score_threshold] > proba_threshold
-        for out in output
-    ]
-
-    dogs_with_masks = [
-        draw_segmentation_masks(img, mask.squeeze(1))
-        for img, mask in zip(dog_list, boolean_masks)
-    ]
-    show(dogs_with_masks)
-
+    cap.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    main()
+    track_dogs_in_webcam(conf_thresh=0.7)
